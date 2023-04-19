@@ -18,9 +18,21 @@
 #define PAGE_SIZE sysconf(_SC_PAGESIZE)
 #define BUF_SIZE 1024
 #define LIMIT 32
+#define LIST_NAME_SIZE 96
+#define LIST_SIZE 1024
+#define LIST_LEN 1024
 unsigned long base_min = 0, base_max;
 
-// typedef Blac
+typedef struct {
+    char listname[LIST_NAME_SIZE];
+    char listdata[LIST_SIZE][LIST_LEN];
+    int listlen;
+} Blacklist;
+
+Blacklist open_blacklist = {"", {'\0'}, 0};
+Blacklist read_blacklist = {"", {'\0'}, 0};
+Blacklist connect_blacklist = {"", {'\0'}, 0};
+Blacklist getaddrinfo_blacklist = {"", {'\0'}, 0};
 
 static int      (*old_system)(const char*);
 static int      (*old_open)(const char *, int, ...);
@@ -40,36 +52,67 @@ FILE* get_logger_file() {
     char* fd_name = getenv("LOGGER_FD");
     return fdopen(strtol(fd_name, NULL, 10), "w");
 }
+void add_blacklist(Blacklist* blacklist, char* listname, char* lineptr) {
+    if (blacklist == NULL | listname == NULL | lineptr == NULL) {
+        return;
+    }
+    if (strcmp(listname, blacklist->listname) != 0) {
+        blacklist->listlen = 0;
+        strcpy(blacklist->listname, listname);
+    }
+    if (blacklist->listlen < LIST_LEN) {
+        lineptr[strlen(lineptr) - 2] = '\0';
+        strcpy(blacklist->listdata[blacklist->listlen], lineptr);
+        blacklist->listlen ++;
+    }
+    return;
+}
+
 void parse_blacklist() {
     printf("--parse_blacklist--\n");
     char* conf_path = getenv("SANDBOX_CONFIG");
     FILE * fptr;
     fptr = fopen(conf_path , "r");
     if (fptr == NULL) { perror("parse_blacklist/fopen");}
-    // while (!feof(fptr)) {
-    //     fscanf(fptr, "%s", buf);
-    // }
-    // char buf[4096];
+    char line[64], cur_listname[64];
+    while (fgets(line, sizeof(line), fptr)) {
+        char *line_ptr = line; int linecnt = 0;
+        while (*line_ptr == ' ' || *line_ptr == '\t' || *line_ptr == '\r' || *line_ptr == '\n') {
+            line_ptr++;
+        }
+        if (strncmp(line_ptr, "BEGIN ", 6) == 0) {
+            strcpy(cur_listname, line_ptr + 6);
+            linecnt = 0;
+            continue;
+        }
+        else if (strncmp(line_ptr, "END ", 4) == 0) {
+            strcpy(cur_listname, "");
+            continue;
+        }
+        else {
+            if (strncmp(cur_listname, "open-blacklist", 14) == 0) {
+                add_blacklist(&open_blacklist, cur_listname, line_ptr);
+            }
+            else if (strncmp(cur_listname, "read-blacklist", 14) == 0) {
+                add_blacklist(&read_blacklist, cur_listname, line_ptr);
+            }
+            else if (strncmp(cur_listname, "connect-blacklist", 17) == 0){
+                add_blacklist(&connect_blacklist, cur_listname, line_ptr);
+            }
+            else if (strncmp(cur_listname, "getaddrinfo-blacklist", 21) == 0) {
+                add_blacklist(&getaddrinfo_blacklist, cur_listname, line_ptr);
+            }
+            linecnt++;
+        }
 
-    // fscanf(fptr, "BEGIN %s-blacklist\n", buf);
-    // printf("open:%s\n", buf);
+
+    }
     fclose(fptr);
     return;
 }
-int is_in_blacklist() {
-    int     fd, sz;
-    char    buf[16384], *s = buf, *line, *saveptr;
-	if ((fd = open("config.txt", O_RDONLY)) < 0) perror("is_in_blacklist/open");
-    while ((sz = read(fd, s, sizeof(buf)-1-(s-buf))) > 0) { s += sz; }
-    *s = 0;
-    s = buf;
-	close(fd);
-	while((line = strtok_r(s, "\n\r", &saveptr)) != NULL) { s = NULL;
-        if(strstr(line, "open") != NULL) {
-            printf("%s\n", line);
-		}
-	}
-}
+// bool is_blacklist(char* api) {
+
+// }
 int get_filename(char *filename, const char *pathname, int fd, FILE *stream) {
     char path[PATH_MAX]; memset(path, 0, PATH_MAX); memset(filename, 0, PATH_MAX);
 
@@ -96,7 +139,7 @@ int get_filename(char *filename, const char *pathname, int fd, FILE *stream) {
 void get_string(const void *buf, char *str, size_t count) {
     size_t total = (count < LIMIT)? count: LIMIT;
     memset(str, 0, LIMIT + 1); strncpy(str, (const char *) buf, total);
-
+ 
     for (size_t i = 0; i < total; i++) {
         if (!isprint(str[i])) str[i] = '.';
     }
@@ -108,6 +151,7 @@ int my_open(const char *pathname, int flags, ...) {
 
     va_list vl; va_start(vl, flags); 
     mode_t mode = (flags & O_CREAT)? va_arg(vl, mode_t): 0;
+
 
     void* handle = dlopen("libc.so.6", RTLD_NOW);
     old_open = dlsym(handle, "open");
